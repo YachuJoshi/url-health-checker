@@ -1,0 +1,17 @@
+import "dotenv/config";
+
+function required(name: string): string {
+  const value = process.env[name];
+
+  if (!value) {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+
+  return value;
+}
+
+export const env = {
+  PORT: Number(process.env.APP_PORT ?? 4000),
+  DATABASE_URL: required("DATABASE_URL"),
+  REDIS_URL: required("REDIS_URL"),
+};

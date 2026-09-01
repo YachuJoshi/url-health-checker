@@ -1,0 +1,12 @@
+{
+  "name": "url-health-checker",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -n api,worker,web -c blue,green,yellow \"pnpm --filter @url-checker/api dev\" \"pnpm --filter @url-checker/worker dev\" \"pnpm --filter @url-checker/web dev\"",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
+  }
+}
