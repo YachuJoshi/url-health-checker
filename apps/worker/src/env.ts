@@ -13,4 +13,5 @@ function required(name: string): string {
 export const env = {
   DATABASE_URL: required("DATABASE_URL"),
   REDIS_URL: required("REDIS_URL"),
+  URL_CHECK_QUEUE_NAME: required("URL_CHECK_QUEUE_NAME"),
 };

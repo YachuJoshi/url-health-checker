@@ -8,10 +8,15 @@
   },
   "dependencies": {
     "@url-checker/contracts": "workspace:*",
-    "dotenv": "^17.4.2"
+    "bullmq": "^6.3.4",
+    "cheerio": "^1.2.0",
+    "dotenv": "^17.4.2",
+    "ioredis": "^6.0.0",
+    "pg": "^8.23.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/pg": "^8.23.1",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
   }
