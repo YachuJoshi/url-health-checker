@@ -4,15 +4,22 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "migrate": "node-pg-migrate -m migrations",
+    "migration:create": "node-pg-migrate create -m migrations --migration-file-language sql",
+    "migrate:up": "node-pg-migrate -m migrations up",
+    "migrate:down": "node-pg-migrate -m migrations down"
   },
   "dependencies": {
     "@url-checker/contracts": "workspace:*",
     "dotenv": "^17.4.2",
-    "fastify": "^5.0.0"
+    "fastify": "^5.0.0",
+    "node-pg-migrate": "^9.0.0",
+    "pg": "^8.23.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/pg": "^8.23.1",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
   }
