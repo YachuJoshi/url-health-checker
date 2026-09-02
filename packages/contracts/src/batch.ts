@@ -28,3 +28,16 @@ export interface BatchProgress {
 export interface BatchWithProgress extends Batch {
   progress: BatchProgress;
 }
+
+/** Max URLs accepted in a single batch. Enforced on both client and server. */
+export const MAX_URLS_PER_BATCH = 500;
+
+export interface CreateBatchRequest {
+  urls: string[];
+}
+
+export interface CreateBatchResponse {
+  batchId: string;
+  totalUrls: number;
+  rejected: { url: string; reason: string }[];
+}

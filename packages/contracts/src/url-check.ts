@@ -22,3 +22,10 @@ export interface UrlCheck {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface UrlCheckJobPayload {
+  checkId: string;
+  batchId: string;
+  url: string;
+  runNumber: number;
+}

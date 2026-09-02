@@ -14,4 +14,5 @@ export const env = {
   PORT: Number(process.env.APP_PORT ?? 4000),
   DATABASE_URL: required("DATABASE_URL"),
   REDIS_URL: required("REDIS_URL"),
+  URL_CHECK_QUEUE_NAME: required("URL_CHECK_QUEUE_NAME"),
 };
