@@ -10,6 +10,7 @@ import { acquireSlot } from "./semaphore";
 import { checkUrl } from "./check-url";
 import { env } from "./env";
 import { redis } from "./redis";
+import { publishCheckUpdate, publishBatchUpdate } from "./publish";
 
 const GLOBAL_CONCURRENCY = 5;
 const GLOBAL_RATE_LIMIT = 10; // requests per second
@@ -50,7 +51,10 @@ async function processJob(job: Job<UrlCheckJobPayload>): Promise<void> {
       console.log(
         `[Job ${job.id}] Success — status=${result.httpStatus} responseMs=${result.responseMs}ms title=${JSON.stringify(result.pageTitle)}`,
       );
+
       await persistSuccess(checkId, runNumber, result);
+      await publishCheckUpdate(batchId, checkId);
+
       return;
     }
 
@@ -60,7 +64,9 @@ async function processJob(job: Job<UrlCheckJobPayload>): Promise<void> {
       );
 
       await persistFailure(checkId, runNumber, result.error);
-      return;
+      await publishCheckUpdate(batchId, checkId);
+
+      throw new UnrecoverableError(result.error);
     }
 
     const isFinalAttempt = attempt >= maxAttempts;
@@ -69,7 +75,9 @@ async function processJob(job: Job<UrlCheckJobPayload>): Promise<void> {
       console.warn(
         `[Job ${job.id}] Final attempt failed — error=${result.error}`,
       );
+
       await persistFailure(checkId, runNumber, result.error);
+      await publishCheckUpdate(batchId, checkId);
     } else {
       console.warn(
         `[Job ${job.id}] Retryable failure (attempt ${attempt}/${maxAttempts}) — error=${result.error}`,
@@ -84,6 +92,8 @@ async function processJob(job: Job<UrlCheckJobPayload>): Promise<void> {
 
     await refreshBatchStatus(batchId);
     console.log(`[Job ${job.id}] Batch status refreshed — batchId=${batchId}`);
+
+    await publishBatchUpdate(batchId);
   }
 }
 

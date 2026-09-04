@@ -11,7 +11,7 @@ Built so far:
 - [x] Batch submission (paste or CSV) with validation and persistence
 - [x] Job enqueueing to BullMQ
 - [x] Worker processing (rate limit, concurrency, retries)
-- [ ] Live updates (SSE)
+- [x] Live updates (SSE)
 - [ ] UI (batch list + batch detail)
 - [ ] Cancel / retry-failed controls
 - [ ] Batch list caching
@@ -127,6 +127,32 @@ Failure is persisted inside the processor on the final attempt rather than in a 
 
 Streaming with a 512KB ceiling, aborting once the head closes. Otherwise a URL pointing at a large file would be fully buffered into worker memory. Non-HTML responses have their body cancelled without reading.
 
+### SSE, with the live channel treated as an optimization
+
+Chosen over WebSockets (data flow is strictly one-way; no upgrade handshake or separate infrastructure) and over polling (constant request overhead). `EventSource` reconnects automatically with no client-side retry logic.
+
+**The live channel is not a correctness mechanism.** Cold load, refresh, and reconnect all resolve by fetching full state from `GET /api/batches/:id`. SSE only spares the client from polling — remove it entirely and the app is still correct.
+
+### Snapshot-on-connect rather than `Last-Event-ID` replay
+
+SSE supports replaying missed events via `Last-Event-ID`, which would require a durable ordered event log per batch with retention.
+
+Instead, every connect and reconnect re-fetches full state, making missed events structurally irrelevant. Identical correctness, no event store.
+
+_Trade-off:_ a snapshot is heavier than a delta — a few hundred KB at 500 URLs.
+
+### Pub/sub messages carry IDs, not data
+
+The worker publishes `{ type, checkId }`. The receiving API instance reads current state from Postgres and constructs the event.
+
+A published payload could otherwise carry a snapshot that is already stale by delivery. Passing an ID keeps Postgres the only source of data.
+
+### Multi-instance fanout
+
+A worker finishing a job has no knowledge of which API instance holds a given client's connection. It publishes to `batch:{id}`; every API instance subscribes, and whichever holds the socket forwards it.
+
+One Redis subscriber per API _process_, fanned out in memory to that process's clients — not one Redis connection per browser tab.
+
 ## Assumptions
 
 Recorded rather than asked, per the brief:
@@ -148,6 +174,8 @@ Recorded rather than asked, per the brief:
 - **The commit/enqueue gap** described above is documented, not closed.
 - **Rate limiting is global, not per-host.** 10 req/s spread across many hosts is polite; 10 req/s at a single host is not. Per-host bucketing would be the production answer.
 - **The semaphore polls at 100ms** rather than using pub/sub notification. Simpler, and with a 5-slot ceiling the contention does not justify the complexity.
+- **No SSE connection limit per client.** A tab opening many batch streams would hold many connections. Production would cap this or multiplex batches over one stream.
+- **Heartbeat is 25s**, chosen to sit under common 30s proxy idle timeouts. Tuning depends on the actual deployment.
 
 ## Trade-offs
 

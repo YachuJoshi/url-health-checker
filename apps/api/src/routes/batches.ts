@@ -1,8 +1,9 @@
 import { pool } from "@/db";
+import { getBatch, getChecks, listBatches } from "@/queries";
 import { jobIdFor, urlCheckQueue } from "@/queue";
 import { CreateBatchSchema } from "@/schema/batches.schema";
 import { validateUrls } from "@/url-validation";
-import { type CreateBatchResponse } from "@url-checker/contracts";
+import { BatchDetail, type CreateBatchResponse } from "@url-checker/contracts";
 import { Queue } from "bullmq";
 import { FastifyInstance } from "fastify";
 
@@ -10,6 +11,28 @@ type AddBulkParams = Parameters<Queue["addBulk"]>[0];
 type JobParam = AddBulkParams[number];
 
 export async function batchRoutes(app: FastifyInstance) {
+  app.get("/batches", async () => {
+    return listBatches();
+  });
+
+  app.get<{ Params: { id: string } }>(
+    "/batches/:id",
+    async (request, reply) => {
+      const batch = await getBatch(request.params.id);
+
+      if (!batch) {
+        return reply.status(404).send({ error: "Batch not found" });
+      }
+
+      const detail: BatchDetail = {
+        batch,
+        checks: await getChecks(request.params.id),
+      };
+
+      return detail;
+    },
+  );
+
   app.post("/batches", async (request, reply) => {
     const parsed = CreateBatchSchema.safeParse(request.body);
 

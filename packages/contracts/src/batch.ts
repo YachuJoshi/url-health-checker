@@ -1,3 +1,5 @@
+import { UrlCheck } from "./url-check";
+
 export const BATCH_STATUSES = [
   "pending",
   "running",
@@ -28,6 +30,25 @@ export interface BatchProgress {
 export interface BatchWithProgress extends Batch {
   progress: BatchProgress;
 }
+
+export interface BatchDetail {
+  batch: BatchWithProgress;
+  checks: UrlCheck[];
+}
+
+export interface CheckUpdatedEvent {
+  type: "check-updated";
+  check: UrlCheck;
+  progress: BatchProgress;
+}
+
+export interface BatchUpdatedEvent {
+  type: "batch-updated";
+  status: BatchStatus;
+  progress: BatchProgress;
+}
+
+export type BatchEvent = CheckUpdatedEvent | BatchUpdatedEvent;
 
 /** Max URLs accepted in a single batch. Enforced on both client and server. */
 export const MAX_URLS_PER_BATCH = 500;

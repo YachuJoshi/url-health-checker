@@ -11,6 +11,7 @@
     "migrate:down": "node-pg-migrate -m migrations down"
   },
   "dependencies": {
+    "@fastify/cors": "^11.3.0",
     "@url-checker/contracts": "workspace:*",
     "bullmq": "^6.3.4",
     "dotenv": "^17.4.2",
