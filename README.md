@@ -153,6 +153,26 @@ A worker finishing a job has no knowledge of which API instance holds a given cl
 
 One Redis subscriber per API _process_, fanned out in memory to that process's clients — not one Redis connection per browser tab.
 
+## Next.js: server/client boundary
+
+| Concern                     | Component type | Reason                                                                                         |
+| --------------------------- | -------------- | ---------------------------------------------------------------------------------------------- |
+| Initial batch list / detail | Server         | Cold open must ship correct state in the HTML — no loading flash, no post-hydration round trip |
+| `EventSource` subscription  | Client         | Requires a persistent browser connection                                                       |
+| CSV parsing, form state     | Client         | `FileReader` and interactivity are browser-only                                                |
+
+Server components fetch the initial snapshot and pass it to a client component as a prop. The client component seeds its state from that prop and takes over live updates. A client-side `useEffect` fetch would work but would show an empty shell on cold open — the opposite of what the brief requires.
+
+`export const dynamic = "force-dynamic"` on both pages: batch state is live and must never be statically rendered at build time. `cache: "no-store"` is set explicitly on every fetch rather than relying on the framework default.
+
+### The list page has no live connection — deliberately
+
+The batch list is served from a 30-second cache; pushing live updates into it would contradict its own caching strategy. The list is a directory, the detail page is the live view. `router.refresh()` after submission revalidates it.
+
+### No server actions
+
+The POST goes to Fastify, not Next. A server action would mean Next proxying to our own API for no benefit, and would blur the API/UI process separation.
+
 ## Assumptions
 
 Recorded rather than asked, per the brief:
@@ -176,6 +196,8 @@ Recorded rather than asked, per the brief:
 - **The semaphore polls at 100ms** rather than using pub/sub notification. Simpler, and with a 5-slot ceiling the contention does not justify the complexity.
 - **No SSE connection limit per client.** A tab opening many batch streams would hold many connections. Production would cap this or multiplex batches over one stream.
 - **Heartbeat is 25s**, chosen to sit under common 30s proxy idle timeouts. Tuning depends on the actual deployment.
+- **No pagination on the batch list** — capped at 100 most recent.
+- **No virtualization on the batch detail table** — 500 rows render fine; a much larger batch would need windowing.
 
 ## Trade-offs
 

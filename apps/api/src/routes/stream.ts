@@ -21,7 +21,9 @@ export async function streamRoutes(app: FastifyInstance) {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache, no-transform",
         Connection: "keep-alive",
-        "X-Accel-Buffering": "no", // disable nginx response buffering
+        "X-Accel-Buffering": "no",
+        "Access-Control-Allow-Origin": request.headers.origin ?? "*",
+        Vary: "Origin",
       });
 
       const send = (event: BatchEvent) => {
