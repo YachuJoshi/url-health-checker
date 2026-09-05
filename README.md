@@ -12,8 +12,8 @@ Built so far:
 - [x] Job enqueueing to BullMQ
 - [x] Worker processing (rate limit, concurrency, retries)
 - [x] Live updates (SSE)
-- [ ] UI (batch list + batch detail)
-- [ ] Cancel / retry-failed controls
+- [x] UI (batch list + batch detail)
+- [x] Cancel / retry-failed controls
 - [ ] Batch list caching
 
 ## Running the system
@@ -153,6 +153,30 @@ A worker finishing a job has no knowledge of which API instance holds a given cl
 
 One Redis subscriber per API _process_, fanned out in memory to that process's clients — not one Redis connection per browser tab.
 
+### Cancellation is cooperative — running jobs cannot be killed
+
+BullMQ has no API to terminate an executing job, so cancellation is three layers:
+
+1. **Postgres write (committed first)** — unfinished rows move to `cancelled`. This alone makes the system correct: `markRunning` requires status `IN ('queued','running')`, so a cancelled row can never be claimed.
+2. **Queue removal** — stops jobs that have not started. `job.remove()` throws for active jobs; that is expected and swallowed.
+3. **Redis flag + pub/sub abort** — the flag stops jobs beginning after the cancel; the pub/sub message aborts requests already waiting on the network via `AbortController`. Neither alone is sufficient.
+
+Layers 2 and 3 are optimizations that stop wasted work. Only layer 1 establishes correctness — which is why Postgres commits before any Redis operation.
+
+Workers check for cancellation at three points: before claiming the row, after acquiring the semaphore (waiting there can take seconds), and via abort signal during the request itself.
+
+`FOR UPDATE` on the batch row serializes concurrent cancel requests; the second sees `cancelled` and returns 409.
+
+### Retry-failed bumps `run_number`, which invalidates in-flight work
+
+The reset and the `run_number` increment happen in one statement. Any worker still in flight from the previous run carries the old number, so its conditional write matches zero rows and is silently discarded.
+
+The new BullMQ job ID (`${checkId}#${runNumber}`) differs from the old one, so the retry is a genuinely new job rather than a rejected duplicate.
+
+**Cancelled URLs are retryable alongside failed ones.** After cancelling a batch, "retry failed" is the natural way to resume it; excluding cancelled rows would strand them permanently.
+
+The cancel flag is cleared on retry — a stale flag would abort the retries instantly.
+
 ## Next.js: server/client boundary
 
 | Concern                     | Component type | Reason                                                                                         |
@@ -198,6 +222,7 @@ Recorded rather than asked, per the brief:
 - **Heartbeat is 25s**, chosen to sit under common 30s proxy idle timeouts. Tuning depends on the actual deployment.
 - **No pagination on the batch list** — capped at 100 most recent.
 - **No virtualization on the batch detail table** — 500 rows render fine; a much larger batch would need windowing.
+- **Cancel does not wait for in-flight requests to actually stop.** The endpoint returns as soon as Postgres is committed and the abort is published. A request may take a moment longer to unwind; persisted state is already correct.
 
 ## Trade-offs
 

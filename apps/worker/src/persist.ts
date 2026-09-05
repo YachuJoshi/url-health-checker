@@ -61,6 +61,18 @@ export async function persistFailure(
   return (updated.rowCount ?? 0) > 0;
 }
 
+export async function persistCancelled(
+  checkId: string,
+  runNumber: number,
+): Promise<void> {
+  await pool.query(
+    `UPDATE url_checks
+     SET status = 'cancelled', updated_at = now()
+     WHERE id = $1 AND run_number = $2 AND status IN ('queued', 'running')`,
+    [checkId, runNumber],
+  );
+}
+
 /**
  * Promotes a batch to 'running' on first activity, and to 'completed' once no
  * children remain in flight. Cancelled batches are never promoted & cancellation is terminal.

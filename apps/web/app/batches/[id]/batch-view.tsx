@@ -1,6 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
+import { toast } from "sonner";
 import type { BatchDetail } from "@url-checker/contracts";
 import { useBatchStream } from "@/hooks/useBatchStream";
 import { Badge } from "@/components/ui/badge";
@@ -13,7 +15,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ArrowLeft, Wifi, WifiOff } from "lucide-react";
+import { ArrowLeft, Wifi, WifiOff, XCircle, RefreshCw } from "lucide-react";
+import { cancelBatch, retryFailedBatch, getBatchDetail } from "@/lib/api";
+import { Button } from "@/components/ui/button";
 
 const statusVariant: Record<
   string,
@@ -40,14 +44,39 @@ export function BatchView({
   batchId: string;
   initial: BatchDetail;
 }) {
-  const { detail, connection } = useBatchStream(batchId, initial);
+  const [busy, setBusy] = useState(false);
+
+  const { detail, connection, setDetail } = useBatchStream(batchId, initial);
   const { batch, checks } = detail;
   const { progress } = batch;
+
+  const canCancel = batch.status === "pending" || batch.status === "running";
+  const canRetry =
+    batch.status !== "running" && progress.failed + progress.cancelled > 0;
 
   const done = progress.succeeded + progress.failed + progress.cancelled;
   const percent =
     progress.total > 0 ? Math.round((done / progress.total) * 100) : 0;
   const isLive = connection === "live";
+
+  async function runAction(action: () => Promise<unknown>) {
+    setBusy(true);
+
+    try {
+      await action();
+
+      // Revalidate immediately rather than waiting for event
+      const fresh = await getBatchDetail(batchId);
+
+      if (fresh) {
+        setDetail(fresh);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Action failed");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-12">
@@ -74,6 +103,26 @@ export function BatchView({
           )}
           {connection}
         </span>
+
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy || !canCancel}
+          onClick={() => runAction(() => cancelBatch(batchId))}
+        >
+          <XCircle className="size-3.5 mr-1.5" />
+          Cancel
+        </Button>
+
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy || !canRetry}
+          onClick={() => runAction(() => retryFailedBatch(batchId))}
+        >
+          <RefreshCw className="size-3.5 mr-1.5" />
+          Retry failed ({progress.failed + progress.cancelled})
+        </Button>
       </div>
 
       <div className="mb-6 flex flex-col gap-2">

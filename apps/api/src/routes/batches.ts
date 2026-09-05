@@ -1,9 +1,15 @@
+import { clearCancellation, signalCancellation } from "@/cancellation";
 import { pool } from "@/db";
+import { publishBatchUpdate } from "@/publish";
 import { getBatch, getChecks, listBatches } from "@/queries";
 import { jobIdFor, urlCheckQueue } from "@/queue";
 import { CreateBatchSchema } from "@/schema/batches.schema";
 import { validateUrls } from "@/url-validation";
-import { BatchDetail, type CreateBatchResponse } from "@url-checker/contracts";
+import {
+  Batch,
+  BatchDetail,
+  type CreateBatchResponse,
+} from "@url-checker/contracts";
 import { Queue } from "bullmq";
 import { FastifyInstance } from "fastify";
 
@@ -112,4 +118,171 @@ export async function batchRoutes(app: FastifyInstance) {
 
     return reply.status(201).send(response);
   });
+
+  app.post<{ Params: { id: string } }>(
+    "/batches/:id/cancel",
+    async (request, reply) => {
+      const batchId = request.params.id;
+      const client = await pool.connect();
+
+      let cancelledRows: { id: string; runNumber: number }[];
+
+      try {
+        await client.query("BEGIN");
+
+        const result = await client.query<Batch>(
+          `SELECT status FROM batches WHERE id = $1 FOR UPDATE`,
+          [batchId],
+        );
+
+        if (result.rows.length === 0) {
+          await client.query("ROLLBACK");
+
+          return reply.status(404).send({ error: "Batch not found" });
+        }
+
+        const [batch] = result.rows;
+
+        if (batch.status === "completed" || batch.status === "cancelled") {
+          await client.query("ROLLBACK");
+          return reply
+            .status(409)
+            .send({ error: `Batch is already ${batch.status}` });
+        }
+
+        const cancelled = await client.query<{
+          id: string;
+          run_number: number;
+        }>(
+          `UPDATE url_checks
+         SET status = 'cancelled', updated_at = now()
+         WHERE batch_id = $1 AND status IN ('queued', 'running')
+         RETURNING id, run_number`,
+          [batchId],
+        );
+
+        cancelledRows = cancelled.rows.map((r) => ({
+          id: r.id,
+          runNumber: r.run_number,
+        }));
+
+        await client.query(
+          `UPDATE batches SET status = 'cancelled', updated_at = now()
+          WHERE id = $1`,
+          [batchId],
+        );
+
+        await client.query("COMMIT");
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        client.release();
+      }
+
+      await signalCancellation(batchId);
+
+      const jobIds = cancelledRows.map((check) =>
+        jobIdFor(check.id, check.runNumber),
+      );
+
+      await Promise.allSettled(
+        jobIds.map(async (jobId) => {
+          const job = await urlCheckQueue.getJob(jobId);
+          await job?.remove().catch(() => {}); // throws if the job is active (expected)
+        }),
+      );
+
+      await publishBatchUpdate(batchId);
+
+      return reply.status(200).send({ cancelled: cancelledRows.length });
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    "/batches/:id/retry-failed",
+    async (request, reply) => {
+      const batchId = request.params.id;
+      const client = await pool.connect();
+
+      let retried: { id: string; url: string; run_number: number }[];
+
+      try {
+        await client.query("BEGIN");
+
+        const batch = await client.query(
+          `SELECT id FROM batches WHERE id = $1 FOR UPDATE`,
+          [batchId],
+        );
+
+        if (batch.rows.length === 0) {
+          await client.query("ROLLBACK");
+          return reply.status(404).send({ error: "Batch not found" });
+        }
+
+        const result = await client.query<{
+          id: string;
+          url: string;
+          run_number: number;
+        }>(
+          `
+          UPDATE url_checks 
+          SET status = 'queued',
+            run_number = run_number + 1,
+            attempt_count = 0,
+            error = NULL, http_status = NULL, response_ms = NULL, page_title = NULL,
+            updated_at = now()
+            WHERE batch_id = $1 AND status IN ('failed', 'cancelled')
+            RETURNING id, url, run_number`,
+          [batchId],
+        );
+
+        retried = result.rows;
+
+        if (retried.length === 0) {
+          await client.query("ROLLBACK");
+          return reply
+            .status(409)
+            .send({ error: "No failed or cancelled URLs to retry" });
+        }
+
+        await client.query(
+          `UPDATE batches SET status = 'running', updated_at = now() WHERE id = $1`,
+          [batchId],
+        );
+
+        await client.query("COMMIT");
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        client.release();
+      }
+
+      // Prevent previous cancellation from abort new retries
+      await clearCancellation(batchId);
+
+      const jobsToAdd: JobParam[] = retried.map((check) => ({
+        name: "check-url",
+        data: {
+          checkId: check.id,
+          batchId,
+          url: check.url,
+          runNumber: check.run_number,
+        },
+        opts: {
+          jobId: jobIdFor(check.id, check.run_number),
+          attempts: 3,
+          backoff: { type: "exponential", delay: 1000 },
+          removeOnComplete: true,
+          removeOnFail: false,
+        },
+      }));
+
+      await urlCheckQueue.addBulk(jobsToAdd);
+
+      await publishBatchUpdate(batchId);
+      return reply.status(200).send({ retried: retried.length });
+    },
+  );
 }

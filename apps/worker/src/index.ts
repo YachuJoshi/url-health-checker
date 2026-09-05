@@ -2,6 +2,7 @@ import { UrlCheckJobPayload } from "@url-checker/contracts";
 import { Job, UnrecoverableError, Worker } from "bullmq";
 import {
   markCheckAsRunning,
+  persistCancelled,
   persistFailure,
   persistSuccess,
   refreshBatchStatus,
@@ -11,6 +12,7 @@ import { checkUrl } from "./check-url";
 import { env } from "./env";
 import { redis } from "./redis";
 import { publishCheckUpdate, publishBatchUpdate } from "./publish";
+import { cancellationWatcher, isCancelled } from "./cancellation";
 
 const GLOBAL_CONCURRENCY = 5;
 const GLOBAL_RATE_LIMIT = 10; // requests per second
@@ -24,7 +26,15 @@ async function processJob(job: Job<UrlCheckJobPayload>): Promise<void> {
     `[Job ${job.id}] Start — url=${url} checkId=${checkId} attempt=${attempt}/${maxAttempts}`,
   );
 
+  if (await isCancelled(batchId)) {
+    console.log(`[Batch ${batchId}] - Cancelled`);
+
+    await persistCancelled(checkId, runNumber);
+    throw new UnrecoverableError("Batch cancelled");
+  }
+
   const claimed = await markCheckAsRunning(checkId, runNumber);
+
   if (!claimed) {
     console.warn(
       `[Job ${job.id}] Skipped — checkId=${checkId} already claimed by another worker`,
@@ -35,16 +45,19 @@ async function processJob(job: Job<UrlCheckJobPayload>): Promise<void> {
     );
   }
 
-  console.log(`[Job ${job.id}] Claimed — checkId=${checkId}`);
   await refreshBatchStatus(batchId);
 
-  console.log(`[Job ${job.id}] Waiting for semaphore slot`);
   const slot = await acquireSlot(GLOBAL_CONCURRENCY);
-  console.log(`[Job ${job.id}] Semaphore acquired — fetching ${url}`);
 
   const controller = new AbortController();
+  const unregister = cancellationWatcher.register(batchId, controller);
 
   try {
+    if (await isCancelled(batchId)) {
+      await persistCancelled(checkId, runNumber);
+      throw new UnrecoverableError("Batch cancelled");
+    }
+
     const result = await checkUrl(url, controller.signal);
 
     if (result.type === "success") {
@@ -56,6 +69,15 @@ async function processJob(job: Job<UrlCheckJobPayload>): Promise<void> {
       await publishCheckUpdate(batchId, checkId);
 
       return;
+    }
+
+    if (controller.signal.aborted) {
+      console.warn(`[Job ${job.id}] - Cancelled mid-flight`);
+
+      await persistCancelled(checkId, runNumber);
+      await publishCheckUpdate(batchId, checkId);
+
+      throw new UnrecoverableError("Batch cancelled mid-flight");
     }
 
     if (!result.retryable) {
@@ -87,12 +109,9 @@ async function processJob(job: Job<UrlCheckJobPayload>): Promise<void> {
     // Rethrow so BullMQ applies exponential backoff and retries
     throw new Error(result.error);
   } finally {
+    unregister();
     await slot.release();
-    console.log(`[Job ${job.id}] Semaphore released`);
-
     await refreshBatchStatus(batchId);
-    console.log(`[Job ${job.id}] Batch status refreshed — batchId=${batchId}`);
-
     await publishBatchUpdate(batchId);
   }
 }

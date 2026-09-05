@@ -52,6 +52,32 @@ export async function createBatch(
   return res.json() as Promise<CreateBatchResponse>;
 }
 
+export async function cancelBatch(id: string): Promise<{ cancelled: number }> {
+  const endpoint = `${API_URL}/batches/${id}/cancel`;
+  const res = await fetch(endpoint, { method: "POST" });
+
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail.error ?? `POST ${endpoint} failed: ${res.status}`);
+  }
+
+  return res.json();
+}
+
+export async function retryFailedBatch(
+  id: string,
+): Promise<{ retried: number }> {
+  const endpoint = `${API_URL}/batches/${id}/retry-failed`;
+  const res = await fetch(endpoint, { method: "POST" });
+
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail.error ?? `POST ${endpoint} failed: ${res.status}`);
+  }
+
+  return res.json();
+}
+
 export function streamUrl(batchId: string): string {
   return `${API_URL}/batches/${batchId}/stream`;
 }

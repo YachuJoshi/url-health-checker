@@ -74,5 +74,5 @@ export function useBatchStream(batchId: string, initial: BatchDetail) {
     return () => source.close();
   }, [batchId, isTerminal]);
 
-  return { detail, connection };
+  return { detail, connection, setDetail };
 }
