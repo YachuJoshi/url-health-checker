@@ -2,26 +2,51 @@ services:
   api:
     build:
       target: base
-    command: ["pnpm", "--filter", "@url-checker/api", "dev"]
+    command:
+      [
+        "sh",
+        "-c",
+        "pnpm --filter @url-checker/contracts build && (pnpm --filter @url-checker/contracts dev &) && pnpm --filter @url-checker/api dev",
+      ]
     volumes:
       - ./apps/api/src:/app/apps/api/src
+      - ./apps/api/tsconfig.json:/app/apps/api/tsconfig.json
       - ./packages/contracts/src:/app/packages/contracts/src
+      - ./packages/contracts/tsconfig.json:/app/packages/contracts/tsconfig.json
 
   worker:
     build:
       target: base
-    command: ["pnpm", "--filter", "@url-checker/worker", "dev"]
+    command:
+      [
+        "sh",
+        "-c",
+        "pnpm --filter @url-checker/contracts build && (pnpm --filter @url-checker/contracts dev &) && pnpm --filter @url-checker/worker dev",
+      ]
     volumes:
       - ./apps/worker/src:/app/apps/worker/src
+      - ./apps/worker/tsconfig.json:/app/apps/worker/tsconfig.json
       - ./packages/contracts/src:/app/packages/contracts/src
+      - ./packages/contracts/tsconfig.json:/app/packages/contracts/tsconfig.json
 
   web:
     build:
       target: base
-    command: ["pnpm", "--filter", "@url-checker/web", "dev"]
+    command:
+      [
+        "sh",
+        "-c",
+        "pnpm --filter @url-checker/contracts build && (pnpm --filter @url-checker/contracts dev &) && pnpm --filter @url-checker/web dev",
+      ]
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:4000/api
+      API_URL: http://api:4000/api
     volumes:
       - ./apps/web/app:/app/apps/web/app
       - ./apps/web/src:/app/apps/web/src
+      - ./apps/web/public:/app/apps/web/public
+      - ./apps/web/next.config.ts:/app/apps/web/next.config.ts
+      - ./apps/web/tsconfig.json:/app/apps/web/tsconfig.json
+      - ./apps/web/postcss.config.mjs:/app/apps/web/postcss.config.mjs
       - ./packages/contracts/src:/app/packages/contracts/src
+      - ./packages/contracts/tsconfig.json:/app/packages/contracts/tsconfig.json

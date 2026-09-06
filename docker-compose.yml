@@ -10,7 +10,11 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-url_checker}",
+        ]
       interval: 3s
       timeout: 3s
       retries: 10
@@ -45,6 +49,7 @@ services:
       PORT: 4000
       DATABASE_URL: postgresql://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@postgres:5432/${POSTGRES_DB:-url_checker}
       REDIS_URL: redis://redis:6379
+      URL_CHECK_QUEUE_NAME: ${URL_CHECK_QUEUE_NAME:-url_checks}
     ports:
       - "4000:4000"
     depends_on:
@@ -60,6 +65,7 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@postgres:5432/${POSTGRES_DB:-url_checker}
       REDIS_URL: redis://redis:6379
+      URL_CHECK_QUEUE_NAME: ${URL_CHECK_QUEUE_NAME:-url_checks}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -72,6 +78,8 @@ services:
       target: web
       args:
         NEXT_PUBLIC_API_URL: http://localhost:4000/api
+    environment:
+      API_URL: http://api:4000/api
     ports:
       - "3000:3000"
     depends_on:
