@@ -14,7 +14,7 @@ Built so far:
 - [x] Live updates (SSE)
 - [x] UI (batch list + batch detail)
 - [x] Cancel / retry-failed controls
-- [ ] Batch list caching
+- [x] Batch list caching
 
 ## Running the system
 
@@ -177,6 +177,28 @@ The new BullMQ job ID (`${checkId}#${runNumber}`) differs from the old one, so t
 
 The cancel flag is cleared on retry — a stale flag would abort the retries instantly.
 
+### Batch list cache: 30s TTL plus version-stamped invalidation
+
+The requirement has two halves in tension — cache for 30 seconds, but never go stale in a _user visible_ way. Resolving it means deciding which staleness is visible:
+
+| Change                        | Visible?                                        | Invalidates? |
+| ----------------------------- | ----------------------------------------------- | ------------ |
+| New batch created             | Yes — the user just made it                     | Yes          |
+| Batch `running` → `completed` | Yes — a wrong status persists                   | Yes          |
+| Progress 14/40 → 15/40        | No — nobody watches a _list_ for per-URL counts | No           |
+
+Invalidating per completed URL would bust the cache hundreds of times per batch and make it decorative. So **the list cache is invalidated on batch lifecycle transitions only**; per-URL counts on the list may lag by up to 30s. The list is a directory; the detail page is the live view — which is also why the list page holds no SSE connection.
+
+**Why version stamping rather than deleting the key.** Deletion has a read-through race: instance A reads a miss and queries Postgres, instance B invalidates, then A writes its now-stale result with a fresh 30s TTL — precisely the user-visible staleness the brief warns about. Incrementing a version counter instead means A's stale write lands on a key nobody will read, which then expires on its own. `INCR` is atomic, so concurrent invalidations cannot collide, and old versions need no cleanup.
+
+**Why keep a TTL at all** when invalidation is explicit: it bounds the blast radius of a _missed_ invalidation. Worst case becomes 30 seconds wrong rather than permanently wrong.
+
+**The worker invalidates too.** Completing the last URL in a batch is a lifecycle transition performed by the worker process. `refreshBatchStatus` returns whether the status actually changed, so invalidation fires on genuine transitions only. Cache key names live in `contracts` so both processes cannot drift.
+
+**Two caches, not one.** Invalidating Redis is insufficient on its own — Next.js keeps its own client-side router cache, so `router.refresh()` runs after submission. Otherwise the server cache is correct and the browser still shows a stale list.
+
+Cache status is exposed via an `X-Cache: HIT|MISS` response header.
+
 ## Next.js: server/client boundary
 
 | Concern                     | Component type | Reason                                                                                         |
@@ -223,6 +245,10 @@ Recorded rather than asked, per the brief:
 - **No pagination on the batch list** — capped at 100 most recent.
 - **No virtualization on the batch detail table** — 500 rows render fine; a much larger batch would need windowing.
 - **Cancel does not wait for in-flight requests to actually stop.** The endpoint returns as soon as Postgres is committed and the abort is published. A request may take a moment longer to unwind; persisted state is already correct.
+- **Progress counts on the batch list may lag up to 30s.** Deliberate — see the
+  caching decision. The batch detail page is always live.
+- **Old cache versions are not actively deleted**, relying on TTL expiry. Bounded
+  and self-cleaning, but a very high invalidation rate would briefly hold more keys.
 
 ## Trade-offs
 

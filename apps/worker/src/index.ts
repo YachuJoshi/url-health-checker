@@ -13,6 +13,7 @@ import { env } from "./env";
 import { redis } from "./redis";
 import { publishCheckUpdate, publishBatchUpdate } from "./publish";
 import { cancellationWatcher, isCancelled } from "./cancellation";
+import { invalidateBatchList } from "./cache";
 
 const GLOBAL_CONCURRENCY = 5;
 const GLOBAL_RATE_LIMIT = 10; // requests per second
@@ -111,7 +112,12 @@ async function processJob(job: Job<UrlCheckJobPayload>): Promise<void> {
   } finally {
     unregister();
     await slot.release();
-    await refreshBatchStatus(batchId);
+    const statusChanged = await refreshBatchStatus(batchId);
+
+    if (statusChanged) {
+      await invalidateBatchList();
+    }
+
     await publishBatchUpdate(batchId);
   }
 }

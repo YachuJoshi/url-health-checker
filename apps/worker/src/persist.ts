@@ -1,5 +1,6 @@
 import { pool } from "./db";
 import type { CheckResult } from "./check-url";
+import { BatchStatus } from "@url-checker/contracts";
 
 /**
  * Every write is conditional on run_number. A worker still in flight from a
@@ -74,12 +75,17 @@ export async function persistCancelled(
 }
 
 /**
- * Promotes a batch to 'running' on first activity, and to 'completed' once no
- * children remain in flight. Cancelled batches are never promoted & cancellation is terminal.
+ * Returns true only when the batch's status actually changed,
+ * so callers can invalidate the list cache on genuine lifecycle transitions
+ * rather than on every completed URL.
  */
-export async function refreshBatchStatus(batchId: string): Promise<void> {
-  await pool.query(
-    `UPDATE batches b
+export async function refreshBatchStatus(batchId: string): Promise<boolean> {
+  const { rows } = await pool.query<{
+    status: BatchStatus;
+    previous: BatchStatus;
+  }>(
+    `
+    UPDATE batches b
     SET status = CASE 
         WHEN NOT EXISTS (
           SELECT 1 FROM url_checks u
@@ -88,8 +94,12 @@ export async function refreshBatchStatus(batchId: string): Promise<void> {
         ELSE 'running'::batch_status
       END,
       updated_at = now()
+    FROM (SELECT id, status FROM batches WHERE id = $1) AS prior
     WHERE b.id = $1 AND b.status <> 'cancelled'
+    RETURNING b.status, prior.status AS previous
     `,
     [batchId],
   );
+
+  return rows.length > 0 && rows[0].status !== rows[0].previous;
 }

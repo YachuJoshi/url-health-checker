@@ -1,3 +1,4 @@
+import { getBatchList, invalidateBatchList, setBatchList } from "@/cache";
 import { clearCancellation, signalCancellation } from "@/cancellation";
 import { pool } from "@/db";
 import { publishBatchUpdate } from "@/publish";
@@ -8,6 +9,7 @@ import { validateUrls } from "@/url-validation";
 import {
   Batch,
   BatchDetail,
+  BatchWithProgress,
   type CreateBatchResponse,
 } from "@url-checker/contracts";
 import { Queue } from "bullmq";
@@ -17,8 +19,19 @@ type AddBulkParams = Parameters<Queue["addBulk"]>[0];
 type JobParam = AddBulkParams[number];
 
 export async function batchRoutes(app: FastifyInstance) {
-  app.get("/batches", async () => {
-    return listBatches();
+  app.get("/batches", async (_request, reply) => {
+    const cached = await getBatchList<BatchWithProgress[]>();
+
+    if (cached) {
+      reply.header("X-Cache", "HIT");
+      return cached;
+    }
+
+    const batches = await listBatches();
+    await setBatchList(batches);
+    reply.header("X-Cache", "MISS");
+
+    return batches;
   });
 
   app.get<{ Params: { id: string } }>(
@@ -109,6 +122,7 @@ export async function batchRoutes(app: FastifyInstance) {
     }));
 
     await urlCheckQueue.addBulk(jobs);
+    await invalidateBatchList();
 
     const response: CreateBatchResponse = {
       batchId,
@@ -193,6 +207,7 @@ export async function batchRoutes(app: FastifyInstance) {
         }),
       );
 
+      await invalidateBatchList();
       await publishBatchUpdate(batchId);
 
       return reply.status(200).send({ cancelled: cancelledRows.length });
@@ -280,6 +295,7 @@ export async function batchRoutes(app: FastifyInstance) {
       }));
 
       await urlCheckQueue.addBulk(jobsToAdd);
+      await invalidateBatchList();
 
       await publishBatchUpdate(batchId);
       return reply.status(200).send({ retried: retried.length });

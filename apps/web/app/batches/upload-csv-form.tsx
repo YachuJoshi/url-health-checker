@@ -38,6 +38,7 @@ export function UploadCSVForm() {
     setError(null);
     try {
       const { batchId } = await createBatch({ urls });
+      router.refresh();
       router.push(`/batches/${batchId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Submission failed");
