@@ -2,9 +2,12 @@
   "name": "url-health-checker",
   "private": true,
   "scripts": {
-    "dev": "concurrently -n api,worker,web -c blue,green,yellow \"pnpm --filter @url-checker/api dev\" \"pnpm --filter @url-checker/worker dev\" \"pnpm --filter @url-checker/web dev\"",
+    "start": "docker compose -f docker-compose.yml up --build",
+    "dev": "docker compose up --build",
+    "dev:local": "concurrently -n api,worker,web -c blue,green,yellow \"pnpm --filter @url-checker/api dev\" \"pnpm --filter @url-checker/worker dev\" \"pnpm --filter @url-checker/web dev\"",
     "docker:up": "docker compose up -d",
-    "docker:down": "docker compose down"
+    "down": "docker compose down",
+    "reset": "docker compose down -v"
   },
   "devDependencies": {
     "concurrently": "^9.0.0"

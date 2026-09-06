@@ -18,9 +18,33 @@ Built so far:
 
 ## Running the system
 
-> A single-command setup is not yet in place — the API, worker, and web app
-> currently run on the host while Postgres and Redis run in containers. This
-> will be consolidated before delivery.
+```bash
+docker compose up --build
+```
+
+That is the whole thing — Postgres, Redis, migrations, API, worker, and web. No `.env` file is required; Compose defaults cover local development. Copy `.env.example` to `.env` to override.
+
+- Web: `http://localhost:3000`
+- API: `http://localhost:4000`
+
+Migrations run as a one-shot service that must complete before the API or worker start, so the database is always at the right schema.
+
+### Scaling
+
+```bash
+docker compose up --build --scale worker=3    # global limits still hold
+docker compose up --build --scale api=2       # SSE still reaches every client
+```
+
+### Development with hot reload
+
+```bash
+pnpm dev        # docker-compose.override.yml, source mounted
+pnpm dev:local  # host processes; needs `pnpm docker:up` for Postgres + Redis
+pnpm reset      # tear down and drop the database volume
+```
+
+`pnpm start` passes `-f docker-compose.yml`, which suppresses the override and runs production containers.
 
 ```bash
 pnpm install
@@ -199,6 +223,21 @@ Invalidating per completed URL would bust the cache hundreds of times per batch 
 
 Cache status is exposed via an `X-Cache: HIT|MISS` response header.
 
+## Horizontal scaling behaviour
+
+**API instances scale freely.** They hold no per-client state that matters for correctness. Live updates work across instances because a worker publishes to Redis and every API instance subscribes — whichever holds a given client's socket forwards the event. An instance that never saw a batch created still streams its updates. Each API process opens one Redis subscriber and fans out in memory, so connection count scales with processes, not browser tabs.
+
+**Worker instances scale freely.** The two throttling guarantees are enforced in Redis, not process memory:
+
+- _Rate limit_ — BullMQ's limiter is Redis-backed, so 10 req/s is global for free.
+- _Concurrency_ — BullMQ's `concurrency` is per-process and would multiply, so a Redis ZSET semaphore enforces the global ceiling of 5.
+
+Verifiable: run `--scale worker=3` and watch `redis-cli ZCARD semaphore:url-checks` — it never exceeds 5.
+
+**Migrations do not race.** They run as a separate one-shot service gated on `service_completed_successfully`, rather than in application startup where N instances would race.
+
+**What would need attention beyond this.** Postgres is a single instance and the first bottleneck; read replicas for list/detail queries would come first. Redis is likewise a single point of failure — losing it costs in-flight scheduling but no user-visible truth, since queued rows in Postgres remain re-enqueueable.
+
 ## Next.js: server/client boundary
 
 | Concern                     | Component type | Reason                                                                                         |
@@ -260,6 +299,12 @@ The idempotency story here _is_ the conditional `UPDATE ... WHERE run_number = $
 
 **pnpm workspaces over Turborepo.**
 Build caching is irrelevant at this size. One less tool to justify.
+
+**`NEXT_PUBLIC_API_URL` is a build argument, not a runtime variable.** `NEXT_PUBLIC_` values are inlined into the client bundle by `next build`, so it must be set at image build time. This means the image is environment-specific.
+
+_With more time:_ a runtime config endpoint, or serving the API through the same origin behind a reverse proxy.
+
+**Compose defaults over a required `.env`.** Makes `docker compose up` work from a bare clone. Acceptable because the project has no real secrets; a system with credentials should fail loudly on a missing `.env` instead.
 
 ## Type safety
 

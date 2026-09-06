@@ -1,0 +1,27 @@
+services:
+  api:
+    build:
+      target: base
+    command: ["pnpm", "--filter", "@url-checker/api", "dev"]
+    volumes:
+      - ./apps/api/src:/app/apps/api/src
+      - ./packages/contracts/src:/app/packages/contracts/src
+
+  worker:
+    build:
+      target: base
+    command: ["pnpm", "--filter", "@url-checker/worker", "dev"]
+    volumes:
+      - ./apps/worker/src:/app/apps/worker/src
+      - ./packages/contracts/src:/app/packages/contracts/src
+
+  web:
+    build:
+      target: base
+    command: ["pnpm", "--filter", "@url-checker/web", "dev"]
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:4000/api
+    volumes:
+      - ./apps/web/app:/app/apps/web/app
+      - ./apps/web/src:/app/apps/web/src
+      - ./packages/contracts/src:/app/packages/contracts/src
